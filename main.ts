@@ -1,6 +1,3 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0"
-import nodemailer from "npm:nodemailer@6.9.1"
-
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://bxgbckjeewukanokmvsn.supabase.co"
 const SUPABASE_SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || ""
 const GMAIL_USER = Deno.env.get("GMAIL_USER") || "nihat.bycvision@gmail.com"
@@ -11,50 +8,50 @@ function page(html) {
   return new Response(body, { headers: { "Content-Type": "text/html" } })
 }
 
+async function getReq(uid) {
+  const r = await fetch(SUPABASE_URL + "/rest/v1/requests?uid=eq." + encodeURIComponent(uid) + "&select=data,uid", {
+    headers: { apikey: SUPABASE_SERVICE_ROLE, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE }
+  })
+  if (!r.ok) return null
+  const rows = await r.json()
+  return Array.isArray(rows) && rows.length ? rows[0] : null
+}
+
+async function updateReq(uid, status, data, now) {
+  const r = await fetch(SUPABASE_URL + "/rest/v1/requests?uid=eq." + encodeURIComponent(uid), {
+    method: "PATCH",
+    headers: { apikey: SUPABASE_SERVICE_ROLE, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE, "Content-Type": "application/json" },
+    body: JSON.stringify({ status, data, updated_at: now })
+  })
+  if (!r.ok) return await r.text()
+  return null
+}
+
 function sendNotification(d, action, comment) {
   const email = d.ownerEmail || d.requesterEmail || d.email || ""
   if (!email) return
-  const color = action === "approve" ? "#16a34a" : "#dc2626"
   const label = action === "approve" ? "Onaylandi" : "Reddedildi"
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD }
-  })
-  let html = "<div style='font-family:Arial;max-width:600px;margin:0 auto;padding:20px'>"
-  html += "<h2 style='color:" + color + "'>Talep " + label + "</h2>"
-  html += "<table style='width:100%;border-collapse:collapse;margin:20px 0'>"
-  html += "<tr><td style='padding:8px'><b>Talep No:</b></td><td style='padding:8px'>" + (d.reqId || "-") + "</td></tr>"
-  html += "<tr><td style='padding:8px'><b>Durum:</b></td><td style='padding:8px'>" + label + "</td></tr>"
-  if (action === "reject") {
-    html += "<tr><td style='padding:8px'><b>Red Nedeni:</b></td><td style='padding:8px'>" + comment + "</td></tr>"
-  }
-  html += "<tr><td style='padding:8px'><b>Tarih:</b></td><td style='padding:8px'>" + new Date().toLocaleString("tr-TR") + "</td></tr>"
-  html += "</table></div>"
-  transporter.sendMail({
-    from: '"Lapis ERP" <' + GMAIL_USER + '>',
-    to: email,
-    subject: label + " - Talep #" + (d.reqId || "-"),
-    html: html
-  }, function(err) {
-    if (err) console.error("Mail error:", err)
-    else console.log("Mail sent to", email)
-  })
+  fetch(SUPABASE_URL + "/functions/v1/send-mail", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4Z2Jja2plZXd1a2Fub2ttdnNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDgzNDcsImV4cCI6MjA5MzIyNDM0N30.24rw0UoORzQ1p7peTMfvTKKEuubc9pcCPvubDGiuGME" },
+    body: JSON.stringify({
+      to: email,
+      subject: label + " - Talep #" + (d.reqId || "-"),
+      html: "<div style='font-family:Arial;max-width:600px;margin:0 auto;padding:20px'><h2>Talep " + label + "</h2><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px'><b>Talep No:</b></td><td style='padding:8px'>" + (d.reqId || "-") + "</td></tr><tr><td style='padding:8px'><b>Durum:</b></td><td style='padding:8px'>" + label + "</td></tr>" + (action === "reject" ? "<tr><td style='padding:8px'><b>Red Nedeni:</b></td><td style='padding:8px'>" + comment + "</td></tr>" : "") + "<tr><td style='padding:8px'><b>Tarih:</b></td><td style='padding:8px'>" + new Date().toLocaleString("tr-TR") + "</td></tr></table></div>"
+    })
+  }).catch(() => {})
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: { "Access-Control-Allow-Origin": "*" } })
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { "Access-Control-Allow-Origin": "*" } })
 
   const url = new URL(req.url)
   const uid = url.searchParams.get("uid")
   const action = url.searchParams.get("action")
-
   if (!uid || !action) return page("<h2>Gecersiz istek</h2><p>uid ve action gerekli</p>")
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
-  const { data: row, error: err } = await supabase.from("requests").select("data, uid").eq("uid", uid).limit(1).single()
-  if (err || !row) return page("<h2 style='color:red'>Talep bulunamadi</h2>")
+  const row = await getReq(uid)
+  if (!row) return page("<h2 style='color:red'>Talep bulunamadi</h2>")
 
   const d = row.data || {}
   const cs = d.status || ""
@@ -70,10 +67,7 @@ Deno.serve(async (req) => {
     const label = cs === "approved" ? "ONAYLANDI" : "REDDEDILDI"
     const color = cs === "approved" ? "#16a34a" : "#dc2626"
     const ma = d.mailApproval || {}
-    let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid " + color + ";border-radius:8px'>"
-    h += "<h1 style='color:" + color + "'>Islem Tamamlanmis</h1>"
-    h += "<p><b>Talep No:</b> " + (d.reqId || uid) + "</p>"
-    h += "<p><b>Durum:</b> " + label + "</p>"
+    let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid " + color + ";border-radius:8px'><h1 style='color:" + color + "'>Islem Tamamlanmis</h1><p><b>Talep No:</b> " + (d.reqId || uid) + "</p><p><b>Durum:</b> " + label + "</p>"
     if (ma.decidedAt) h += "<p><b>Tarih:</b> " + new Date(ma.decidedAt).toLocaleString("tr-TR") + "</p>"
     h += "</div>"
     return page(h)
@@ -83,13 +77,7 @@ Deno.serve(async (req) => {
     const form = await req.formData()
     const comment = (form.get("comment") || "").toString().trim()
     if (action === "reject" && !comment) {
-      let h = "<div style='max-width:400px;margin:0 auto;padding:30px'>"
-      h += "<h1 style='color:#dc2626'>Red Icin Aciklama Zorunlu</h1>"
-      h += "<form method='POST' action='?uid=" + uid + "&action=reject' style='margin-top:20px'>"
-      h += "<textarea name='comment' rows='4' style='width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-size:14px' placeholder='Red aciklamasi...' required></textarea>"
-      h += "<button type='submit' style='margin-top:12px;padding:10px 24px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px'>Reddet</button>"
-      h += "</form></div>"
-      return page(h)
+      return page("<div style='max-width:400px;margin:0 auto;padding:30px'><h1 style='color:#dc2626'>Red Icin Aciklama Zorunlu</h1><form method='POST' action='?uid=" + uid + "&action=reject' style='margin-top:20px'><textarea name='comment' rows='4' style='width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-size:14px' placeholder='Red aciklamasi...' required></textarea><button type='submit' style='margin-top:12px;padding:10px 24px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px'>Reddet</button></form></div>")
     }
 
     const status = action === "approve" ? "approved" : "rejected"
@@ -99,41 +87,21 @@ Deno.serve(async (req) => {
     d.mailApproval = { status: label, decidedAt: now, decidedBy: "Mail Onay", decisionComment: action === "reject" ? comment : "Mail ile onaylandi" }
     d.updatedAt = now
 
-    const { error: updErr } = await supabase.from("requests").update({ status, data: d, updated_at: now }).eq("uid", uid)
-    if (updErr) return page("<h2 style='color:red'>Hata: " + updErr.message + "</h2>")
+    const updErr = await updateReq(uid, status, d, now)
+    if (updErr) return page("<h2 style='color:red'>Hata: " + updErr + "</h2>")
 
     sendNotification(d, action, comment)
 
     const color = action === "approve" ? "#16a34a" : "#dc2626"
-    let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid " + color + ";border-radius:8px'>"
-    h += "<h1 style='color:" + color + "'>Talep " + label + "</h1>"
-    h += "<p><b>Talep No:</b> " + (d.reqId || uid) + "</p>"
-    h += "<p><b>Durum:</b> " + label + "</p>"
+    let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid " + color + ";border-radius:8px'><h1 style='color:" + color + "'>Talep " + label + "</h1><p><b>Talep No:</b> " + (d.reqId || uid) + "</p><p><b>Durum:</b> " + label + "</p>"
     if (action === "reject") h += "<p><b>Aciklama:</b> " + comment + "</p>"
-    h += "<p><b>Zaman:</b> " + new Date(now).toLocaleString("tr-TR") + "</p>"
-    h += "</div>"
+    h += "<p><b>Zaman:</b> " + new Date(now).toLocaleString("tr-TR") + "</p></div>"
     return page(h)
   }
 
   if (action === "reject") {
-    let h = "<div style='max-width:400px;margin:0 auto;padding:30px'>"
-    h += "<h1 style='color:#dc2626'>Talebi Reddet</h1>"
-    h += "<p style='color:#666'>Talep No: " + (d.reqId || uid) + "</p>"
-    h += "<p style='color:#666'>Red aciklamasi zorunludur:</p>"
-    h += "<form method='POST' action='?uid=" + uid + "&action=reject' style='margin-top:20px'>"
-    h += "<textarea name='comment' rows='4' style='width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-size:14px' placeholder='Red aciklamasi...' required></textarea><br>"
-    h += "<button type='submit' style='margin-top:12px;padding:10px 24px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px'>Reddet</button>"
-    h += "</form></div>"
-    return page(h)
+    return page("<div style='max-width:400px;margin:0 auto;padding:30px'><h1 style='color:#dc2626'>Talebi Reddet</h1><p style='color:#666'>Talep No: " + (d.reqId || uid) + "</p><p style='color:#666'>Red aciklamasi zorunludur:</p><form method='POST' action='?uid=" + uid + "&action=reject' style='margin-top:20px'><textarea name='comment' rows='4' style='width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-size:14px' placeholder='Red aciklamasi...' required></textarea><br><button type='submit' style='margin-top:12px;padding:10px 24px;background:#dc2626;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px'>Reddet</button></form></div>")
   }
 
-  let h = "<div style='max-width:400px;margin:0 auto;padding:30px'>"
-  h += "<h1>Talebi Onayla</h1>"
-  h += "<p style='color:#666'>Talep No: " + (d.reqId || uid) + "</p>"
-  h += "<p>Bu talebi onaylamak istediğinize emin misiniz?</p>"
-  h += "<form method='POST' action='?uid=" + uid + "&action=approve' style='margin-top:20px'>"
-  h += "<input type='hidden' name='comment' value='Mail ile onaylandi'>"
-  h += "<button type='submit' style='padding:12px 32px;background:#16a34a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px'>Onayla</button>"
-  h += "</form></div>"
-  return page(h)
+  return page("<div style='max-width:400px;margin:0 auto;padding:30px'><h1>Talebi Onayla</h1><p style='color:#666'>Talep No: " + (d.reqId || uid) + "</p><p>Bu talebi onaylamak istediğinize emin misiniz?</p><form method='POST' action='?uid=" + uid + "&action=approve' style='margin-top:20px'><input type='hidden' name='comment' value='Mail ile onaylandi'><button type='submit' style='padding:12px 32px;background:#16a34a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:16px'>Onayla</button></form></div>")
 })
