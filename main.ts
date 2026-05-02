@@ -27,17 +27,42 @@ async function updateReq(uid, status, data, now) {
   return null
 }
 
-function sendNotification(d, action, comment) {
-  const email = d.ownerEmail || d.requesterEmail || d.email || ""
-  if (!email) return
+async function getPurchasingRecipients() {
+  const r = await fetch(SUPABASE_URL + "/rest/v1/master_users?select=data", {
+    headers: { apikey: SUPABASE_SERVICE_ROLE, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE }
+  })
+  if (!r.ok) return []
+  const rows = await r.json()
+  const emails = (Array.isArray(rows) ? rows : [])
+    .map((x: any) => (x && (x.data || x)) || null)
+    .filter(Boolean)
+    .filter((u: any) => {
+      const role = String(u.role || "").toUpperCase()
+      return role.includes("SATINALMA") || role.includes("PURCHASE") || role.includes("PROCUREMENT") || role.includes("TEDARIK")
+    })
+    .map((u: any) => String(u.email || u.eposta || u.mail || "").trim().toLowerCase())
+    .filter(Boolean)
+  return [...new Set(emails)]
+}
+
+function uniqEmails(arr: string[]) {
+  return [...new Set((arr || []).map((e) => String(e || "").trim().toLowerCase()).filter(Boolean))]
+}
+
+async function sendNotification(d, action, comment) {
+  const ownerEmail = String(d.ownerEmail || d.requesterEmail || d.email || "").trim().toLowerCase()
+  const purchasing = await getPurchasingRecipients()
+  const recipients = uniqEmails([ownerEmail, ...purchasing])
+  if (!recipients.length) return
   const label = action === "approve" ? "Onaylandi" : "Reddedildi"
+  const isRevision = Number(d.revision || 0) > 0 || !!String(d.revisedFrom || "").trim()
   fetch(SUPABASE_URL + "/functions/v1/send-mail", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ4Z2Jja2plZXd1a2Fub2ttdnNuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDgzNDcsImV4cCI6MjA5MzIyNDM0N30.24rw0UoORzQ1p7peTMfvTKKEuubc9pcCPvubDGiuGME" },
     body: JSON.stringify({
-      to: email,
-      subject: label + " - Talep #" + (d.reqId || "-"),
-      html: "<div style='font-family:Arial;max-width:600px;margin:0 auto;padding:20px'><h2>Talep " + label + "</h2><table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px'><b>Talep No:</b></td><td style='padding:8px'>" + (d.reqId || "-") + "</td></tr><tr><td style='padding:8px'><b>Durum:</b></td><td style='padding:8px'>" + label + "</td></tr>" + (action === "reject" ? "<tr><td style='padding:8px'><b>Red Nedeni:</b></td><td style='padding:8px'>" + comment + "</td></tr>" : "") + "<tr><td style='padding:8px'><b>Tarih:</b></td><td style='padding:8px'>" + new Date().toLocaleString("tr-TR") + "</td></tr></table></div>"
+      to: recipients.join(","),
+      subject: (isRevision ? "REVIZYON | " : "") + label + " - Talep #" + (d.reqId || "-"),
+      html: "<div style='font-family:Arial;max-width:700px;margin:0 auto;padding:20px'><h2>Talep " + label + "</h2>" + (isRevision ? "<div style='padding:8px 10px;border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;color:#92400e;margin-bottom:10px'><b>REVIZYON:</b> Onceki talep " + (d.revisedFrom || "-") + " | Rev R" + (d.revision || 0) + "</div>" : "") + "<table style='width:100%;border-collapse:collapse'><tr><td style='padding:8px'><b>Talep No:</b></td><td style='padding:8px'>" + (d.reqId || "-") + "</td></tr><tr><td style='padding:8px'><b>Durum:</b></td><td style='padding:8px'>" + label + "</td></tr>" + (action === "reject" ? "<tr><td style='padding:8px'><b>Red Nedeni:</b></td><td style='padding:8px'>" + comment + "</td></tr>" : "") + "<tr><td style='padding:8px'><b>Tarih:</b></td><td style='padding:8px'>" + new Date().toLocaleString("tr-TR") + "</td></tr></table></div>"
     })
   }).catch(() => {})
 }
@@ -104,7 +129,7 @@ Deno.serve(async (req) => {
     const updErr = await updateReq(uid, status, d, now)
     if (updErr) return page("<h2 style='color:red'>Hata: " + updErr + "</h2>")
 
-    sendNotification(d, action, comment)
+    await sendNotification(d, action, comment)
 
     const color = action === "approve" ? "#16a34a" : "#dc2626"
     let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid " + color + ";border-radius:8px'><h1 style='color:" + color + "'>Talep " + label + "</h1><p><b>Talep No:</b> " + (d.reqId || uid) + "</p><p><b>Durum:</b> " + label + "</p>"
