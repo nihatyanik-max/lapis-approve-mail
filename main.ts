@@ -45,6 +45,24 @@ async function getPurchasingRecipients() {
   return [...new Set(emails)]
 }
 
+async function getApproverDisplayName(d) {
+  const fallback = String(d.approverName || d.approverFullName || d.approverUser || "Mail Onay").trim() || "Mail Onay"
+  const approverKey = String(d.approverUser || "").trim()
+  if (!approverKey) return fallback
+  try {
+    const r = await fetch(SUPABASE_URL + "/rest/v1/master_users?select=data", {
+      headers: { apikey: SUPABASE_SERVICE_ROLE, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE }
+    })
+    if (!r.ok) return fallback
+    const rows = await r.json()
+    const users = (Array.isArray(rows) ? rows : []).map((x: any) => (x && (x.data || x)) || null).filter(Boolean)
+    const u = users.find((x: any) => String(x.username || "") === approverKey) || null
+    return String((u && (u.full || u.fullName || u.name)) || fallback).trim() || fallback
+  } catch (_e) {
+    return fallback
+  }
+}
+
 function uniqEmails(arr: string[]) {
   return [...new Set((arr || []).map((e) => String(e || "").trim().toLowerCase()).filter(Boolean))]
 }
@@ -138,8 +156,11 @@ Deno.serve(async (req) => {
     const status = action === "approve" ? "approved" : "rejected"
     const label = action === "approve" ? "ONAYLANDI" : "REDDEDILDI"
     const now = new Date().toISOString()
+    const approverName = await getApproverDisplayName(d)
     d.status = status
-    d.mailApproval = { status: label, decidedAt: now, decidedBy: "Mail Onay", decisionComment: action === "reject" ? comment : "Mail ile onaylandi" }
+    d.mailApproval = { status: label, decidedAt: now, decidedBy: approverName, decisionComment: action === "reject" ? comment : "Mail ile onaylandi" }
+    d.decidedAt = now
+    d.decidedBy = approverName
     d.updatedAt = now
 
     const updErr = await updateReq(uid, status, d, now)
