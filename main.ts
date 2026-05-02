@@ -67,6 +67,18 @@ async function sendNotification(d, action, comment) {
   }).catch(() => {})
 }
 
+async function notifyIfApprovedAndPending(uid, row) {
+  const d = (row && row.data) || {}
+  const st = String((row && row.status) || d.status || "").toLowerCase()
+  const already = !!d._approvedMailNotifiedAt
+  if (st !== "approved" || already) return false
+  await sendNotification(d, "approve", "")
+  d._approvedMailNotifiedAt = new Date().toISOString()
+  d.updatedAt = d._approvedMailNotifiedAt
+  await updateReq(uid, "approved", d, d.updatedAt)
+  return true
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: { "Access-Control-Allow-Origin": "*" } })
 
@@ -83,6 +95,7 @@ Deno.serve(async (req) => {
   const rowStatus = row.status || ""
 
   if (action === "status") {
+    await notifyIfApprovedAndPending(uid, row)
     if (d.isSuperseded || d.supersededBy || rowStatus === "superseded") {
       return new Response(JSON.stringify({ ok: true, status: "SUPERSEDED", supersededBy: d.supersededBy || "" }), { headers: { "Content-Type": "application/json" } })
     }
@@ -130,6 +143,10 @@ Deno.serve(async (req) => {
     if (updErr) return page("<h2 style='color:red'>Hata: " + updErr + "</h2>")
 
     await sendNotification(d, action, comment)
+    if (action === "approve") {
+      d._approvedMailNotifiedAt = now
+      await updateReq(uid, status, d, now)
+    }
 
     const color = action === "approve" ? "#16a34a" : "#dc2626"
     let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid " + color + ";border-radius:8px'><h1 style='color:" + color + "'>Talep " + label + "</h1><p><b>Talep No:</b> " + (d.reqId || uid) + "</p><p><b>Durum:</b> " + label + "</p>"
