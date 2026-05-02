@@ -9,7 +9,7 @@ function page(html) {
 }
 
 async function getReq(uid) {
-  const r = await fetch(SUPABASE_URL + "/rest/v1/requests?uid=eq." + encodeURIComponent(uid) + "&select=data,uid", {
+  const r = await fetch(SUPABASE_URL + "/rest/v1/requests?uid=eq." + encodeURIComponent(uid) + "&select=data,uid,status", {
     headers: { apikey: SUPABASE_SERVICE_ROLE, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE }
   })
   if (!r.ok) return null
@@ -55,9 +55,10 @@ Deno.serve(async (req) => {
 
   const d = row.data || {}
   const cs = d.status || ""
+  const rowStatus = row.status || ""
 
   if (action === "status") {
-    if (d.isSuperseded || d.supersededBy) {
+    if (d.isSuperseded || d.supersededBy || rowStatus === "superseded") {
       return new Response(JSON.stringify({ ok: true, status: "SUPERSEDED", supersededBy: d.supersededBy || "" }), { headers: { "Content-Type": "application/json" } })
     }
     const ma = d.mailApproval || {}
@@ -66,7 +67,7 @@ Deno.serve(async (req) => {
 
   if (action !== "approve" && action !== "reject") return page("<h2>Gecersiz aksiyon</h2>")
 
-  if (d.isSuperseded || d.supersededBy) {
+  if (d.isSuperseded || d.supersededBy || rowStatus === "superseded") {
     const newRev = d.supersededBy || "-"
     let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid #dc2626;border-radius:8px'><h1 style='color:#dc2626'>Bu Talep Artik Gecersiz</h1>"
     h += "<p><b>Talep No:</b> " + (d.reqId || uid) + "</p>"
