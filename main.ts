@@ -70,10 +70,13 @@ async function sendNotification(d, action, comment) {
 async function notifyIfApprovedAndPending(uid, row) {
   const d = (row && row.data) || {}
   const st = String((row && row.status) || d.status || "").toLowerCase()
-  const already = !!d._approvedMailNotifiedAt
+  const currentReqId = String(d.reqId || uid || "")
+  const notifiedReqId = String(d._approvedMailNotifiedReqId || "")
+  const already = !!d._approvedMailNotifiedAt && notifiedReqId === currentReqId
   if (st !== "approved" || already) return false
   await sendNotification(d, "approve", "")
   d._approvedMailNotifiedAt = new Date().toISOString()
+  d._approvedMailNotifiedReqId = currentReqId
   d.updatedAt = d._approvedMailNotifiedAt
   await updateReq(uid, "approved", d, d.updatedAt)
   return true
@@ -145,6 +148,7 @@ Deno.serve(async (req) => {
     await sendNotification(d, action, comment)
     if (action === "approve") {
       d._approvedMailNotifiedAt = now
+      d._approvedMailNotifiedReqId = String(d.reqId || uid || "")
       await updateReq(uid, status, d, now)
     }
 
