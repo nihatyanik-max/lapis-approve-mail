@@ -57,11 +57,24 @@ Deno.serve(async (req) => {
   const cs = d.status || ""
 
   if (action === "status") {
+    if (d.isSuperseded || d.supersededBy) {
+      return new Response(JSON.stringify({ ok: true, status: "SUPERSEDED", supersededBy: d.supersededBy || "" }), { headers: { "Content-Type": "application/json" } })
+    }
     const ma = d.mailApproval || {}
     return new Response(JSON.stringify({ ok: true, status: ma.status || "" }), { headers: { "Content-Type": "application/json" } })
   }
 
   if (action !== "approve" && action !== "reject") return page("<h2>Gecersiz aksiyon</h2>")
+
+  if (d.isSuperseded || d.supersededBy) {
+    const newRev = d.supersededBy || "-"
+    let h = "<div style='max-width:400px;margin:0 auto;padding:30px;border:2px solid #dc2626;border-radius:8px'><h1 style='color:#dc2626'>Bu Talep Artik Gecersiz</h1>"
+    h += "<p><b>Talep No:</b> " + (d.reqId || uid) + "</p>"
+    h += "<p>Bu talep revize edilmistir. Onay veya red islemi yapilamaz.</p>"
+    h += "<p><b>Yeni revizyon:</b> " + newRev + "</p>"
+    h += "<p style='color:#666;margin-top:20px'>Lutfen yeni revizyonu degerlendiriniz.</p></div>"
+    return page(h)
+  }
 
   if (cs === "approved" || cs === "rejected") {
     const label = cs === "approved" ? "ONAYLANDI" : "REDDEDILDI"
