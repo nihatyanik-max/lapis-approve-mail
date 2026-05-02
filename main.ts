@@ -121,7 +121,13 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, status: "SUPERSEDED", supersededBy: d.supersededBy || "" }), { headers: { "Content-Type": "application/json" } })
     }
     const ma = d.mailApproval || {}
-    return new Response(JSON.stringify({ ok: true, status: ma.status || "" }), { headers: { "Content-Type": "application/json" } })
+    return new Response(JSON.stringify({
+      ok: true,
+      status: ma.status || "",
+      decisionComment: ma.decisionComment || "",
+      decidedAt: ma.decidedAt || d.decidedAt || "",
+      decidedBy: ma.decidedBy || d.decidedBy || ""
+    }), { headers: { "Content-Type": "application/json" } })
   }
 
   if (action !== "approve" && action !== "reject") return page("<h2>Gecersiz aksiyon</h2>")
